@@ -17,7 +17,7 @@ use tauri::{
 use std::{os::windows::ffi::OsStrExt, thread, time::Duration};
 #[cfg(windows)]
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, GetLastError, BOOL, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM},
+    Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM},
     System::Threading::CreateMutexW,
     UI::WindowsAndMessaging::{
         EnumWindows, GetWindowTextLengthW, GetWindowTextW, SetForegroundWindow, ShowWindowAsync,
@@ -93,7 +93,7 @@ fn show_existing_main_window() {
 }
 
 #[cfg(windows)]
-unsafe extern "system" fn find_and_show_main_window(window: HWND, state: LPARAM) -> BOOL {
+unsafe extern "system" fn find_and_show_main_window(window: HWND, state: LPARAM) -> i32 {
     let title_length = GetWindowTextLengthW(window);
     if title_length <= 0 {
         return 1;
