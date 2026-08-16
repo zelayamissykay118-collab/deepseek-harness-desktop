@@ -13,6 +13,104 @@ use tauri::{
     Manager, Runtime, Wry,
 };
 
+#[cfg(windows)]
+use std::{os::windows::ffi::OsStrExt, thread, time::Duration};
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, GetLastError, BOOL, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM},
+    System::Threading::CreateMutexW,
+    UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextLengthW, GetWindowTextW, SetForegroundWindow, ShowWindowAsync,
+        SW_RESTORE,
+    },
+};
+
+#[cfg(windows)]
+const SINGLE_INSTANCE_MUTEX: &str =
+    "Local\\io.github.hairyf.deepseek-harness-desktop-single-instance";
+#[cfg(windows)]
+const MAIN_WINDOW_TITLE: &str = "Deepseek Harness Desktop";
+
+/// Windows fallback for the Tauri single-instance plugin. The plugin's event
+/// target window can fail to register on some systems while its mutex remains,
+/// which lets later launches continue as full app instances. This guard exits
+/// before Tauri starts and restores the existing native window directly.
+#[cfg(windows)]
+struct WindowsSingleInstance(HANDLE);
+
+#[cfg(windows)]
+impl WindowsSingleInstance {
+    fn acquire() -> Option<Self> {
+        let mutex_name = std::ffi::OsStr::new(SINGLE_INSTANCE_MUTEX)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let handle = unsafe { CreateMutexW(std::ptr::null(), 0, mutex_name.as_ptr()) };
+
+        if handle.is_null() {
+            log::error!("failed to create the Windows single-instance mutex");
+            return Some(Self(handle));
+        }
+
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            unsafe {
+                CloseHandle(handle);
+            }
+            show_existing_main_window();
+            None
+        } else {
+            Some(Self(handle))
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsSingleInstance {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn show_existing_main_window() {
+    for _ in 0..20 {
+        let mut found = false;
+        unsafe {
+            EnumWindows(
+                Some(find_and_show_main_window),
+                &mut found as *mut bool as LPARAM,
+            );
+        }
+        if found {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn find_and_show_main_window(window: HWND, state: LPARAM) -> BOOL {
+    let title_length = GetWindowTextLengthW(window);
+    if title_length <= 0 {
+        return 1;
+    }
+
+    let mut title = vec![0_u16; title_length as usize + 1];
+    let copied = GetWindowTextW(window, title.as_mut_ptr(), title.len() as i32);
+    if copied <= 0 || String::from_utf16_lossy(&title[..copied as usize]) != MAIN_WINDOW_TITLE {
+        return 1;
+    }
+
+    ShowWindowAsync(window, SW_RESTORE);
+    SetForegroundWindow(window);
+    *(state as *mut bool) = true;
+    0
+}
+
 // setup app
 fn setup(app_handle: tauri::AppHandle) {
     // 启动进程监控（tick 检测 dsh 服务状态）
@@ -141,6 +239,12 @@ fn builder() -> tauri::Builder<tauri::Wry> {
 pub fn run() {
     // 初始化日志系统
     logger::init();
+
+    #[cfg(windows)]
+    let _single_instance = match WindowsSingleInstance::acquire() {
+        Some(guard) => guard,
+        None => return,
+    };
 
     builder()
         .setup(|app| {
