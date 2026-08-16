@@ -78,7 +78,7 @@ jobs:
   publish:
     # tag 触发时等待 changelog 生成完成再打包；手动触发时跳过 changelog 直接测试打包
     needs: changelog
-    if: github.event_name == 'workflow_dispatch' || needs.changelog.result == 'success'
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.changelog.result == 'success')
     strategy:
       fail-fast: false
       matrix:
