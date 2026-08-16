@@ -114,6 +114,12 @@ fn handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + 'static {
 // configure tauri builder
 fn builder() -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
+        // 必须最先注册：重复启动时复用已有进程，并唤醒主窗口。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                show_window(&window);
+            }
+        }))
         // 点击关闭按钮时隐藏到托盘而不是退出程序
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
